@@ -40,16 +40,29 @@ async function run() {
   const shaderModule = state.device.createShaderModule({
     label: "Hardcoded triangle shader",
     code: /* WGSL */ `
+	struct VertexOutput {
+	@builtin(position) pos: vec4f,
+	@location(0) color: vec3f,
+	};
 	@vertex
-	fn vs_main(@location(0) pos: vec2f) -> @builtin(position) vec4f {
-	return vec4f(pos, 0.0, 1.0);
+	fn vs_main(
+	@location(0) pos: vec2f,
+	@location(1) color: vec3f
+	) -> VertexOutput {
+	var out: VertexOutput;
+	out.pos = vec4f(pos, 0.0, 1.0);
+	out.color = color;
+	return out;
 	}
 	
 	@fragment
-	fn fs_main() -> @location(0) vec4f {
-	return vec4f(1.0, 1.0, 1.0, 1.0);
+	fn fs_main(@location(0) color: vec3f) -> @location(0) vec4f {
+	return vec4f(color, 1.0);
 	}`,
   });
+
+  const FLOAT_SIZE = 4;
+  const VERTEX_STRIDE = 5 * FLOAT_SIZE;
 
   const pipeline = state.device.createRenderPipeline({
     layout: "auto",
@@ -58,12 +71,17 @@ async function run() {
       entryPoint: "vs_main",
       buffers: [
         {
-          arrayStride: 8,
+          arrayStride: VERTEX_STRIDE,
           attributes: [
             {
               shaderLocation: 0,
               offset: 0,
               format: "float32x2",
+            },
+            {
+              shaderLocation: 1,
+              offset: 8,
+              format: "float32x3",
             },
           ],
         },
@@ -82,7 +100,10 @@ async function run() {
 }
 
 function render(state: WebGPUState, pipeline: GPURenderPipeline) {
-  const vertices = new Float32Array([0.0, 0.5, -0.5, -0.5, 0.5, -0.5]);
+  const vertices = new Float32Array([
+    0.0, 0.5, 1.0, 0.0, 0.0, -0.5, -0.5, 0.0, 1.0, 0.0, 0.5, -0.5, 0.0, 0.0,
+    1.0,
+  ]);
 
   const vertexBuffer = state.device.createBuffer({
     label: "Triangle vertices",
