@@ -6,6 +6,15 @@ interface WebGPUState {
   format: GPUTextureFormat;
 }
 
+interface PipelineConfig {
+  shaderName: string;
+  shaderCode: string;
+  vertexAttributes: GPUVertexBufferLayout[];
+  bindGroupLayout?: GPUBindGroupLayout;
+  topology?: GPUPrimitiveTopology;
+  useDepth?: boolean;
+}
+
 run();
 
 async function initWebGPU(canvas: HTMLCanvasElement): Promise<WebGPUState> {
@@ -39,20 +48,6 @@ async function run() {
 
   const state = await initWebGPU(canvas);
 
-  const shaderSource = await fetch("/shader.wgsl").then((r) => r.text());
-
-  const shaderModule = state.device.createShaderModule({
-    label: "Hardcoded triangle shader",
-    code: shaderSource,
-  });
-  const compilationInfo = await shaderModule.getCompilationInfo();
-  if (compilationInfo.messages.length > 0) {
-    console.error("WGSL Compilation Errors:");
-    compilationInfo.messages.forEach((msg) => {
-      console.error(`${msg.lineNum}:${msg.linePos} - ${msg.message}`);
-    });
-  }
-
   const bindGroupLayout = state.device.createBindGroupLayout({
     entries: [
       {
@@ -66,39 +61,20 @@ async function run() {
   const FLOAT_SIZE = 4;
   const VERTEX_STRIDE = 6 * FLOAT_SIZE;
 
-  const pipeline = state.device.createRenderPipeline({
-    layout: state.device.createPipelineLayout({
-      bindGroupLayouts: [bindGroupLayout],
-    }),
-    vertex: {
-      module: shaderModule,
-      entryPoint: "vs_main",
-      buffers: [
-        {
-          arrayStride: VERTEX_STRIDE,
-          attributes: [
-            {
-              shaderLocation: 0,
-              offset: 0,
-              format: "float32x3",
-            },
-            {
-              shaderLocation: 1,
-              offset: 8,
-              format: "float32x3",
-            },
-          ],
-        },
-      ],
-    },
-    fragment: {
-      module: shaderModule,
-      entryPoint: "fs_main",
-      targets: [{ format: state.format }],
-    },
-    primitive: {
-      topology: "triangle-list",
-    },
+  const pipeline = createRenderPipeline(state.device, state.format, {
+    shaderName: "Pyramid",
+    shaderCode: await fetch("/shader.wgsl").then((r) => r.text()),
+    vertexAttributes: [
+      {
+        arrayStride: VERTEX_STRIDE,
+        attributes: [
+          { shaderLocation: 0, offset: 0, format: "float32x3" },
+          { shaderLocation: 1, offset: 12, format: "float32x3" },
+        ],
+      },
+    ],
+    bindGroupLayout: bindGroupLayout,
+    useDepth: true,
   });
 
   render(state, pipeline, bindGroupLayout);
@@ -142,6 +118,12 @@ function render(
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
 
+  const depthTexture = state.device.createTexture({
+    size: [state.context.canvas.width, state.context.canvas.height],
+    format: "depth24plus",
+    usage: GPUTextureUsage.RENDER_ATTACHMENT,
+  });
+
   state.device.queue.writeBuffer(vertexBuffer, 0, new Float32Array(vertices));
 
   function frame() {
@@ -170,6 +152,12 @@ function render(
           storeOp: "store",
         },
       ],
+      depthStencilAttachment: {
+        view: depthTexture.createView(),
+        depthClearValue: 1.0,
+        depthLoadOp: "clear",
+        depthStoreOp: "store",
+      },
     });
 
     const bindGroup = state.device.createBindGroup({
@@ -216,4 +204,38 @@ function createVertexArray(vertices: Vertex[]): Float32Array {
   }
 
   return vertexArr;
+}
+
+function createRenderPipeline(
+  device: GPUDevice,
+  format: GPUTextureFormat,
+  config: PipelineConfig,
+): GPURenderPipeline {
+  const shaderModule = device.createShaderModule({
+    label: config.shaderName,
+    code: config.shaderCode,
+  });
+  const layouts = config.bindGroupLayout ? [config.bindGroupLayout] : [];
+
+  return device.createRenderPipeline({
+    layout: device.createPipelineLayout({ bindGroupLayouts: layouts }),
+    vertex: {
+      module: shaderModule,
+      entryPoint: "vs_main",
+      buffers: config.vertexAttributes,
+    },
+    fragment: {
+      module: shaderModule,
+      entryPoint: "fs_main",
+      targets: [{ format }],
+    },
+    primitive: { topology: config.topology ?? "triangle-list" },
+    depthStencil: config.useDepth
+      ? {
+          format: "depth24plus",
+          depthWriteEnabled: true,
+          depthCompare: "less",
+        }
+      : undefined,
+  });
 }
