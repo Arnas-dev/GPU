@@ -1,3 +1,5 @@
+import { mat4 } from "gl-matrix";
+
 interface WebGPUState {
   device: GPUDevice;
   context: GPUCanvasContext;
@@ -37,35 +39,37 @@ async function run() {
 
   const state = await initWebGPU(canvas);
 
+  const shaderSource = await fetch("/shader.wgsl").then((r) => r.text());
+
   const shaderModule = state.device.createShaderModule({
     label: "Hardcoded triangle shader",
-    code: /* WGSL */ `
-	struct VertexOutput {
-	@builtin(position) pos: vec4f,
-	@location(0) color: vec3f,
-	};
-	@vertex
-	fn vs_main(
-	@location(0) pos: vec2f,
-	@location(1) color: vec3f
-	) -> VertexOutput {
-	var out: VertexOutput;
-	out.pos = vec4f(pos, 0.0, 1.0);
-	out.color = color;
-	return out;
-	}
-	
-	@fragment
-	fn fs_main(@location(0) color: vec3f) -> @location(0) vec4f {
-	return vec4f(color, 1.0);
-	}`,
+    code: shaderSource,
+  });
+  const compilationInfo = await shaderModule.getCompilationInfo();
+  if (compilationInfo.messages.length > 0) {
+    console.error("WGSL Compilation Errors:");
+    compilationInfo.messages.forEach((msg) => {
+      console.error(`${msg.lineNum}:${msg.linePos} - ${msg.message}`);
+    });
+  }
+
+  const bindGroupLayout = state.device.createBindGroupLayout({
+    entries: [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.VERTEX,
+        buffer: { type: "uniform" },
+      },
+    ],
   });
 
   const FLOAT_SIZE = 4;
   const VERTEX_STRIDE = 5 * FLOAT_SIZE;
 
   const pipeline = state.device.createRenderPipeline({
-    layout: "auto",
+    layout: state.device.createPipelineLayout({
+      bindGroupLayouts: [bindGroupLayout],
+    }),
     vertex: {
       module: shaderModule,
       entryPoint: "vs_main",
@@ -96,13 +100,19 @@ async function run() {
       topology: "triangle-list",
     },
   });
-  render(state, pipeline);
+
+  render(state, pipeline, bindGroupLayout);
 }
 
-function render(state: WebGPUState, pipeline: GPURenderPipeline) {
-  const vertices = new Float32Array([
-    0.0, 0.5, 1.0, 0.0, 0.0, -0.5, -0.5, 0.0, 1.0, 0.0, 0.5, -0.5, 0.0, 0.0,
-    1.0,
+function render(
+  state: WebGPUState,
+  pipeline: GPURenderPipeline,
+  bindGroupLayout: GPUBindGroupLayout,
+) {
+  const vertices = createVertexArray([
+    { pos: [-0.5, -0.5], color: [1.0, 0.0, 0.0] },
+    { pos: [0.5, -0.5], color: [0.0, 1.0, 0.0] },
+    { pos: [0.0, 0.5], color: [0.0, 0.0, 1.0] },
   ]);
 
   const vertexBuffer = state.device.createBuffer({
@@ -110,9 +120,28 @@ function render(state: WebGPUState, pipeline: GPURenderPipeline) {
     size: vertices.byteLength,
     usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
   });
-  state.device.queue.writeBuffer(vertexBuffer, 0, vertices);
+
+  const mvpBuffer = state.device.createBuffer({
+    size: 64,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+
+  state.device.queue.writeBuffer(vertexBuffer, 0, new Float32Array(vertices));
 
   function frame() {
+    const mvpMatrix = mat4.create();
+    mat4.perspective(
+      mvpMatrix,
+      Math.PI / 4, // 45 degree field of view
+      1, // aspect ratio
+      0.1, // near plane
+      100, // far plane
+    );
+    mat4.translate(mvpMatrix, mvpMatrix, [0, 0, -2]);
+    mat4.rotateX(mvpMatrix, mvpMatrix, Date.now() / 1000);
+    mat4.rotateY(mvpMatrix, mvpMatrix, Date.now() / 1500);
+    state.device.queue.writeBuffer(mvpBuffer, 0, new Float32Array(mvpMatrix));
+
     const commandEncoder = state.device.createCommandEncoder();
     const textureView = state.context.getCurrentTexture().createView();
 
@@ -127,8 +156,19 @@ function render(state: WebGPUState, pipeline: GPURenderPipeline) {
       ],
     });
 
+    const bindGroup = state.device.createBindGroup({
+      layout: bindGroupLayout,
+      entries: [
+        {
+          binding: 0,
+          resource: { buffer: mvpBuffer },
+        },
+      ],
+    });
+
     renderPass.setPipeline(pipeline);
     renderPass.setVertexBuffer(0, vertexBuffer);
+    renderPass.setBindGroup(0, bindGroup);
     renderPass.draw(3);
     renderPass.end();
 
@@ -137,4 +177,25 @@ function render(state: WebGPUState, pipeline: GPURenderPipeline) {
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
+}
+
+interface Vertex {
+  pos: number[];
+  color: number[];
+}
+
+function createVertexArray(vertices: Vertex[]): Float32Array {
+  const VERTEX_SIZE = 5;
+  const vertexArr = new Float32Array(vertices.length * VERTEX_SIZE);
+
+  for (let i = 0; i < vertices.length; i++) {
+    const offset = i * VERTEX_SIZE;
+    vertexArr[offset + 0] = vertices[i].pos[0];
+    vertexArr[offset + 1] = vertices[i].pos[1];
+    vertexArr[offset + 2] = vertices[i].color[0];
+    vertexArr[offset + 3] = vertices[i].color[1];
+    vertexArr[offset + 4] = vertices[i].color[2];
+  }
+
+  return vertexArr;
 }

@@ -8,6 +8,7 @@
     "cf-typegen": "wrangler types --env-interface CloudflareBindings"
   },
   "dependencies": {
+    "gl-matrix": "^3.4.4",
     "hono": "^4.12.3"
   },
   "devDependencies": {
