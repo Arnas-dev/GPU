@@ -7,11 +7,11 @@ struct VertexOutput {
 
 @vertex
 fn vs_main(
-    @location(0) pos: vec2f,
+    @location(0) pos: vec3f,
     @location(1) color: vec3f
 ) -> VertexOutput {
     var out: VertexOutput;
-    out.pos = mvp * vec4f(pos, 0.0, 1.0);
+    out.pos = mvp * vec4f(pos, 1.0);
     out.color = color;
     return out;
 }

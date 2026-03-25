@@ -64,7 +64,7 @@ async function run() {
   });
 
   const FLOAT_SIZE = 4;
-  const VERTEX_STRIDE = 5 * FLOAT_SIZE;
+  const VERTEX_STRIDE = 6 * FLOAT_SIZE;
 
   const pipeline = state.device.createRenderPipeline({
     layout: state.device.createPipelineLayout({
@@ -80,7 +80,7 @@ async function run() {
             {
               shaderLocation: 0,
               offset: 0,
-              format: "float32x2",
+              format: "float32x3",
             },
             {
               shaderLocation: 1,
@@ -110,10 +110,26 @@ function render(
   bindGroupLayout: GPUBindGroupLayout,
 ) {
   const vertices = createVertexArray([
-    { pos: [-0.5, -0.5], color: [1.0, 0.0, 0.0] },
-    { pos: [0.5, -0.5], color: [0.0, 1.0, 0.0] },
-    { pos: [0.0, 0.5], color: [0.0, 0.0, 1.0] },
+    { pos: [-0.5, -0.5, 0], color: [1.0, 0.0, 0.0] },
+    { pos: [0.5, -0.5, 0], color: [0.0, 1.0, 0.0] },
+    { pos: [0.5, 0.5, 0], color: [0.0, 0.0, 1.0] },
+    { pos: [-0.5, 0.5, 0], color: [1.0, 1.0, 0.0] },
+    { pos: [0, 0, 1], color: [1.0, 1.0, 1.0] },
   ]);
+
+  const indices = [
+    0, 1, 2, 0, 2, 3,
+
+    0, 4, 1, 1, 4, 2, 2, 4, 3, 3, 4, 0,
+  ];
+
+  const indexBuffer = state.device.createBuffer({
+    size: indices.length * 4,
+    usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+    mappedAtCreation: true,
+  });
+  new Uint32Array(indexBuffer.getMappedRange()).set(indices);
+  indexBuffer.unmap();
 
   const vertexBuffer = state.device.createBuffer({
     label: "Triangle vertices",
@@ -169,7 +185,8 @@ function render(
     renderPass.setPipeline(pipeline);
     renderPass.setVertexBuffer(0, vertexBuffer);
     renderPass.setBindGroup(0, bindGroup);
-    renderPass.draw(3);
+    renderPass.setIndexBuffer(indexBuffer, "uint32");
+    renderPass.drawIndexed(indices.length);
     renderPass.end();
 
     state.device.queue.submit([commandEncoder.finish()]);
@@ -185,16 +202,17 @@ interface Vertex {
 }
 
 function createVertexArray(vertices: Vertex[]): Float32Array {
-  const VERTEX_SIZE = 5;
+  const VERTEX_SIZE = 6;
   const vertexArr = new Float32Array(vertices.length * VERTEX_SIZE);
 
   for (let i = 0; i < vertices.length; i++) {
     const offset = i * VERTEX_SIZE;
     vertexArr[offset + 0] = vertices[i].pos[0];
     vertexArr[offset + 1] = vertices[i].pos[1];
-    vertexArr[offset + 2] = vertices[i].color[0];
-    vertexArr[offset + 3] = vertices[i].color[1];
-    vertexArr[offset + 4] = vertices[i].color[2];
+    vertexArr[offset + 2] = vertices[i].pos[2];
+    vertexArr[offset + 3] = vertices[i].color[0];
+    vertexArr[offset + 4] = vertices[i].color[1];
+    vertexArr[offset + 5] = vertices[i].color[2];
   }
 
   return vertexArr;
